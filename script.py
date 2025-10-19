@@ -132,9 +132,16 @@ def get_fx_data(symbol, days=5):
         # 3. Series로 변환 및 결측치 제거
         if hasattr(close_rates, 'squeeze'):
             close_rates = close_rates.squeeze()
-        close_rates = close_rates.dropna()
+        
+        # dropna는 Series/DataFrame에만 있으므로 체크
+        if hasattr(close_rates, 'dropna'):
+            close_rates = close_rates.dropna()
         
         # 4. 데이터 유효성 검사 (최소 2일 데이터 필요)
+        # 스칼라값인 경우 처리 불가
+        if not hasattr(close_rates, '__len__'):
+            return None, "단일 값만 반환됨 (히스토리 데이터 부족)"
+        
         if len(close_rates) < 2:
             return None, "데이터 부족 또는 조회된 거래일이 2일 미만"
             
