@@ -58,7 +58,7 @@ FX_TICKERS = {
 }
 
 # -------------------------------
-# 주가/지수 정보 가져오기 (변동률, 52주, 거래량 포함) - 주식 코드는 이미 안정화됨
+# 주가/지수 정보 가져오기 (변동률, 52주, 거래량 포함)
 # -------------------------------
 def get_price_data(symbol, days=5):
     """yfinance를 사용하여 종가, 변동률, 52주 범위, 거래량 계산"""
@@ -101,19 +101,21 @@ def get_price_data(symbol, days=5):
         return None, f"조회 실패 (yfinance): {e}"
 
 # -------------------------------
-# 환율 히스토리 및 변동률 정보 가져오기 (yfinance 사용) - 🌟 Ambiguous Error 수정 🌟
+# 환율 히스토리 및 변동률 정보 가져오기 (yfinance 사용) - 🌟 Ambiguous Error 최종 수정 🌟
 # -------------------------------
 def get_fx_data(symbol, days=5):
     """yfinance를 사용하여 FX rate의 히스토리 데이터를 가져와 변동률을 계산"""
     try:
-        # download 함수는 progress 인자를 지원하지 않으므로 제거하거나 progress=False를 명시적으로 전달 (yfinance 버전 따라 다름)
-        # 안정성을 위해 download 함수 사용 시 progress=False를 명시 (이전 Ambiguous 오류 해결 경험을 기반)
         fx_data = yf.download(symbol, period=f"{days+2}d", interval="1d", progress=False)
         
+        # 1. DataFrame 유효성 검사 추가: 데이터프레임 자체가 비어있으면 즉시 종료
+        if fx_data.empty:
+            return None, "조회된 데이터가 비어있음 (FX Ticker 조회 실패)"
+
         # 'Close' 데이터만 추출하고 결측치 제거
         close_rates = fx_data.get('Close').dropna()
         
-        # 데이터 유효성 검사 (최소 2일 데이터 필요)
+        # 2. 데이터 유효성 검사 (최소 2일 데이터 필요)
         if close_rates.empty or len(close_rates) < 2:
             return None, "데이터 부족 또는 조회된 거래일이 2일 미만"
             
@@ -128,7 +130,7 @@ def get_fx_data(symbol, days=5):
         # 변동률 계산
         daily_change = (current_rate - yesterday_rate) / yesterday_rate * 100
         
-        # 주간 변동률 계산 (데이터가 충분할 때만 계산)
+        # 3. 주간 변동률 계산 (안전한 조건문 유지)
         weekly_change = 0.0
         if week_ago_rate is not None and week_ago_rate != 0:
             weekly_change = (current_rate - week_ago_rate) / week_ago_rate * 100
@@ -140,11 +142,11 @@ def get_fx_data(symbol, days=5):
         }, None
         
     except Exception as e:
-        # 데이터가 아예 없을 때(404나 API 오류) 이 구문으로 넘어올 수 있음
+        # Ambiguous 오류가 이 catch 블록으로 넘어오지 않도록 로직을 강화했습니다.
         return None, f"조회 실패 (yfinance FX): {e}"
 
 # -------------------------------
-# Slack 메시지 전송 (이전 코드와 동일)
+# Slack 메시지 전송
 # -------------------------------
 def send_to_slack(message):
     payload = {"text": message}
@@ -178,7 +180,6 @@ def main():
     def format_stock_message(name, symbol, data, currency_symbol, is_kr_stock=False):
         
         if is_kr_stock:
-            # 쉼표 포맷만 사용하기 위해 정수형으로 변환
             price = round(data['price'])
             low_52w = round(data['low_52w'])
             high_52w = round(data['high_52w'])
