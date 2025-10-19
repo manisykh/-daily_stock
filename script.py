@@ -36,9 +36,8 @@ US_TICKERS = {
 }
 
 # 주요국 환율 (기준: 1 외화당 KRW)
-# yfinance의 FX Ticker는 '외화KRW=X' 형식을 사용합니다.
 FX_TICKERS = {
-    "USD": "KRW=X",        # YF Ticker for USD/KRW (1 USD = X KRW)
+    "USD": "KRW=X",        
     "JPY": "JPYKRW=X",
     "EUR": "EURKRW=X",
     "GBP": "GBPKRW=X",
@@ -66,32 +65,26 @@ def get_price_data(symbol, days=5):
     try:
         ticker = yf.Ticker(symbol)
         
-        # 1. 가격 및 거래량 데이터 (히스토리)
         price_data = ticker.history(period=f"{days+2}d", interval="1d")
         close_prices = price_data.get('Close').dropna()
         volumes = price_data.get('Volume').dropna()
         
-        # 데이터 유효성 검사 (최소 2일 데이터 필요)
         if close_prices.empty or len(close_prices) < 2:
             return None, "데이터 부족 또는 조회된 거래일이 2일 미만"
             
         current_price = close_prices.iloc[-1]
         yesterday_price = close_prices.iloc[-2]
         
-        # 1주일 변동률을 위한 5거래일 전 종가
         week_ago_price = None
         if len(close_prices) >= days + 1:
             week_ago_price = close_prices.iloc[-days - 1] 
 
-        # 2. 52주 최고/최저가 데이터 (info)
         info = ticker.info
         high_52w = info.get('fiftyTwoWeekHigh', 0.0)
         low_52w = info.get('fiftyTwoWeekLow', 0.0)
         
-        # 3. 거래량
         current_volume = volumes.iloc[-1]
 
-        # 변동률 계산
         daily_change = (current_price - yesterday_price) / yesterday_price * 100
         weekly_change = (current_price - week_ago_price) / week_ago_price * 100 if week_ago_price is not None and week_ago_price != 0 else 0.0
 
@@ -99,7 +92,6 @@ def get_price_data(symbol, days=5):
             "price": float(current_price),
             "low_52w": float(low_52w),
             "high_52w": float(high_52w),
-            
             "daily_change": round(daily_change, 2),
             "weekly_change": round(weekly_change, 2),
             "volume": int(current_volume),
@@ -114,7 +106,6 @@ def get_price_data(symbol, days=5):
 def get_fx_data(symbol, days=5):
     """yfinance를 사용하여 FX rate의 히스토리 데이터를 가져와 변동률을 계산"""
     try:
-        # 넉넉하게 7일 데이터를 가져와서 5일 전 Rate까지 계산
         fx_data = yf.download(symbol, period=f"{days+2}d", interval="1d")
         
         close_rates = fx_data.get('Close').dropna()
@@ -129,7 +120,6 @@ def get_fx_data(symbol, days=5):
         if len(close_rates) >= days + 1:
             week_ago_rate = close_rates.iloc[-days - 1] 
 
-        # 변동률 계산
         daily_change = (current_rate - yesterday_rate) / yesterday_rate * 100
         weekly_change = (current_rate - week_ago_rate) / week_ago_rate * 100 if week_ago_rate is not None and week_ago_rate != 0 else 0.0
 
@@ -163,23 +153,35 @@ def send_to_slack(message):
 def main():
     message_parts = []
     
+    # 변동률 포맷 함수 (이모지 처리)
+    def format_change(change_rate):
+        """변동률에 따라 이모지 및 마크다운을 적용하여 포맷합니다."""
+        if change_rate > 0:
+            return f"*⬆️ +{change_rate:.2f}%*" 
+        elif change_rate < 0:
+            return f"*⬇️ {change_rate:+.2f}%*" 
+        else:
+            return f"↔️ {change_rate:+.2f}%"
+
     # 주식/지수 메시지 포맷 함수 정의
     def format_stock_message(name, symbol, data, currency_symbol, is_kr_stock=False):
         
-        # 한국 주식인 경우 값 자체를 정수로 변환하여 포맷을 : ,d로 설정합니다.
         if is_kr_stock:
+            # 쉼표 포맷만 사용하기 위해 정수형으로 변환
             price = round(data['price'])
             low_52w = round(data['low_52w'])
             high_52w = round(data['high_52w'])
-            # 정수형에 대한 쉼표 포맷
-            price_format = ":,d" 
+            # 💡 수정된 부분: 정수형에 대한 쉼표 포맷은 ":," 만 사용
+            price_format = ":," 
         else:
             price = data['price']
             low_52w = data['low_52w']
             high_52w = data['high_52w']
-            # 미국 주식은 소수점 두 자리 포맷
             price_format = ":,.2f" 
         
+        daily_change_str = format_change(data['daily_change'])
+        weekly_change_str = format_change(data['weekly_change'])
+
         # f-string 포맷 문자열을 format() 함수를 사용하여 동적으로 구성
         price_str = format(price, price_format)
         low_52w_str = format(low_52w, price_format)
@@ -187,7 +189,7 @@ def main():
 
         result = (
             f"• *{name}* ({symbol}): {currency_symbol}{price_str}\n"
-            f"  > *변동률:* 일:{data['daily_change']:+.2f}%, 주:{data['weekly_change']:+.2f}%\n"
+            f"  > *변동률:* 일:{daily_change_str}, 주:{weekly_change_str}\n"
             f"  > *거래량:* {data['volume']:,}주 | *52주 범위:* {currency_symbol}{low_52w_str} ~ {currency_symbol}{high_52w_str}"
         )
         return result
@@ -197,7 +199,6 @@ def main():
     for name, symbol in KR_TICKERS.items():
         data, error = get_price_data(symbol)
         if data:
-            # is_kr_stock=True 설정
             kr_results.append(format_stock_message(name, symbol, data, "₩", is_kr_stock=True))
         else:
             kr_results.append(f"• {name} ({symbol}): [조회 실패] - {error}")
@@ -208,7 +209,6 @@ def main():
     for name, symbol in US_TICKERS.items():
         data, error = get_price_data(symbol, days=5)
         if data:
-            # is_kr_stock=False(기본값)이므로 소수점 두 자리 포맷 적용
             us_results.append(format_stock_message(name, symbol, data, "$", is_kr_stock=False))
         else:
             us_results.append(f"• {name} ({symbol}): [조회 실패] - {error}")
@@ -222,9 +222,11 @@ def main():
         data, error = get_fx_data(symbol)
         
         if data:
-             # 환율은 소수점 2자리까지 표시 (1400.50원)
+             daily_change_str = format_change(data['daily_change'])
+             weekly_change_str = format_change(data['weekly_change'])
+             
              fx_list.append(
-                f"• *{target}*: {data['rate']:,.2f}원 (일:{data['daily_change']:+.2f}%, 주:{data['weekly_change']:+.2f}%)"
+                f"• *{target}*: {data['rate']:,.2f}원 (일:{daily_change_str}, 주:{weekly_change_str})"
              )
         else:
              fx_list.append(f"• *{target}*: [조회 실패] - {error}")
