@@ -35,14 +35,31 @@ US_TICKERS = {
     "QQQ (나스닥100)": "QQQ",
 }
 
-# 주요국 환율 (기준 통화: 원화 KRW)
-FX_TICKERS = [
-    "USD", "JPY", "EUR", "GBP", "CNY", "CAD", "AUD", "CHF", "SGD", 
-    "HKD", "NZD", "SEK", "NOK", "MXN", "BRL", "INR", "TRY", "PLN"
-]
+# 주요국 환율 (기준: 1 외화당 KRW)
+# yfinance의 FX Ticker는 '외화KRW=X' 형식을 사용합니다.
+FX_TICKERS = {
+    "USD": "KRW=X",        # YF Ticker for USD/KRW (1 USD = X KRW)
+    "JPY": "JPYKRW=X",
+    "EUR": "EURKRW=X",
+    "GBP": "GBPKRW=X",
+    "CNY": "CNYKRW=X",
+    "CAD": "CADKRW=X",
+    "AUD": "AUDKRW=X",
+    "CHF": "CHFKRW=X",
+    "SGD": "SGD/KRW=X",
+    "HKD": "HKDKRW=X",
+    "NZD": "NZD/KRW=X",
+    "SEK": "SEKKRW=X",
+    "NOK": "NOKKRW=X",
+    "MXN": "MXNKRW=X",
+    "BRL": "BRLKRW=X",
+    "INR": "INRKRW=X",
+    "TRY": "TRYKRW=X",
+    "PLN": "PLNKRW=X",
+}
 
 # -------------------------------
-# 주가/지수 정보 가져오기 (변동률, 52주, 거래량 포함) - 수정됨
+# 주가/지수 정보 가져오기 (변동률, 52주, 거래량 포함)
 # -------------------------------
 def get_price_data(symbol, days=5):
     """yfinance를 사용하여 종가, 변동률, 52주 범위, 거래량 계산"""
@@ -50,7 +67,6 @@ def get_price_data(symbol, days=5):
         ticker = yf.Ticker(symbol)
         
         # 1. 가격 및 거래량 데이터 (히스토리)
-        # 'progress=False' 인자 제거!
         price_data = ticker.history(period=f"{days+2}d", interval="1d")
         close_prices = price_data.get('Close').dropna()
         volumes = price_data.get('Volume').dropna()
@@ -81,37 +97,50 @@ def get_price_data(symbol, days=5):
         weekly_change = (current_price - week_ago_price) / week_ago_price * 100 if week_ago_price is not None and week_ago_price != 0 else 0.0
 
         return {
-            "price": round(float(current_price), 2),
+            "price": float(current_price), # 포매팅은 main에서 처리
             "daily_change": round(daily_change, 2),
             "weekly_change": round(weekly_change, 2),
             "volume": int(current_volume),
-            "high_52w": round(float(high_52w), 2),
-            "low_52w": round(float(low_52w), 2),
+            "high_52w": float(high_52w),
+            "low_52w": float(low_52w),
         }, None
         
     except Exception as e:
         return None, f"조회 실패 (yfinance): {e}"
 
 # -------------------------------
-# 환율 정보 가져오기 (기준 통화: KRW)
+# 환율 히스토리 및 변동률 정보 가져오기 (yfinance 사용)
 # -------------------------------
-def get_exchange_rate(base, target):
-    url = f"https://api.frankfurter.app/latest?from={base}&to={target}"
-    
+def get_fx_data(symbol, days=5):
+    """yfinance를 사용하여 FX rate의 히스토리 데이터를 가져와 변동률을 계산"""
     try:
-        response = requests.get(url, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-    except requests.RequestException as e:
-        raise ValueError(f"{base}->{target} 환율 API 요청 실패: {e}")
-    except ValueError:
-        raise ValueError(f"{base}->{target} 환율 API 응답 JSON 파싱 실패")
-    
-    rates = data.get("rates")
-    if not rates or target not in rates:
-        return None 
-    
-    return round(rates[target], 5) # 환율은 소수점 5자리까지 표시
+        # 넉넉하게 7일 데이터를 가져와서 5일 전 Rate까지 계산
+        fx_data = yf.download(symbol, period=f"{days+2}d", interval="1d")
+        
+        close_rates = fx_data.get('Close').dropna()
+        
+        if close_rates.empty or len(close_rates) < 2:
+            return None, "데이터 부족 또는 조회된 거래일이 2일 미만"
+            
+        current_rate = close_rates.iloc[-1]
+        yesterday_rate = close_rates.iloc[-2]
+        
+        week_ago_rate = None
+        if len(close_rates) >= days + 1:
+            week_ago_rate = close_rates.iloc[-days - 1] 
+
+        # 변동률 계산
+        daily_change = (current_rate - yesterday_rate) / yesterday_rate * 100
+        weekly_change = (current_rate - week_ago_rate) / week_ago_rate * 100 if week_ago_rate is not None and week_ago_rate != 0 else 0.0
+
+        return {
+            "rate": round(float(current_rate), 2), 
+            "daily_change": round(daily_change, 2),
+            "weekly_change": round(weekly_change, 2),
+        }, None
+        
+    except Exception as e:
+        return None, f"조회 실패 (yfinance FX): {e}"
 
 # -------------------------------
 # Slack 메시지 전송
@@ -134,13 +163,23 @@ def send_to_slack(message):
 def main():
     message_parts = []
     
-    # 메시지 포맷 함수 정의 (재사용을 위해)
-    def format_stock_message(name, symbol, data, currency_symbol):
-        # 52주 최고/최저가와 거래량을 포함하여 상세 포매팅
+    # 주식/지수 메시지 포맷 함수 정의
+    def format_stock_message(name, symbol, data, currency_symbol, is_kr_stock=False):
+        
+        # 한국 주식인 경우 가격을 정수 포매팅 (:,.0f)으로 처리
+        price_format = ":,.0f" if is_kr_stock else ":,.2f"
+        
+        # f-string에서 price_format을 변수로 사용하기 위해 eval을 사용하거나, 두 단계로 포매팅해야 하지만,
+        # 안전하고 간결한 방법을 위해 포맷 문자열을 직접 구성합니다.
+        
+        price_str = f"{data['price']:{price_format}}"
+        low_52w_str = f"{data['low_52w']:{price_format}}"
+        high_52w_str = f"{data['high_52w']:{price_format}}"
+
         result = (
-            f"• *{name}* ({symbol}): {currency_symbol}{data['price']:,.2f}\n"
+            f"• *{name}* ({symbol}): {currency_symbol}{price_str}\n"
             f"  > *변동률:* 일:{data['daily_change']:+.2f}%, 주:{data['weekly_change']:+.2f}%\n"
-            f"  > *거래량:* {data['volume']:,}주 | *52주 범위:* {currency_symbol}{data['low_52w']:,.2f} ~ {currency_symbol}{data['high_52w']:,.2f}"
+            f"  > *거래량:* {data['volume']:,}주 | *52주 범위:* {currency_symbol}{low_52w_str} ~ {currency_symbol}{high_52w_str}"
         )
         return result
 
@@ -149,7 +188,8 @@ def main():
     for name, symbol in KR_TICKERS.items():
         data, error = get_price_data(symbol)
         if data:
-            kr_results.append(format_stock_message(name, symbol, data, "₩"))
+            # is_kr_stock=True 설정하여 정수 포맷 적용
+            kr_results.append(format_stock_message(name, symbol, data, "₩", is_kr_stock=True))
         else:
             kr_results.append(f"• {name} ({symbol}): [조회 실패] - {error}")
     message_parts.append("\n".join(kr_results))
@@ -159,25 +199,28 @@ def main():
     for name, symbol in US_TICKERS.items():
         data, error = get_price_data(symbol, days=5)
         if data:
-            us_results.append(format_stock_message(name, symbol, data, "$"))
+            # is_kr_stock=False(기본값)이므로 소수점 두 자리 포맷 적용
+            us_results.append(format_stock_message(name, symbol, data, "$", is_kr_stock=False))
         else:
             us_results.append(f"• {name} ({symbol}): [조회 실패] - {error}")
     message_parts.append("\n".join(us_results))
 
-    # 3. 환율 정보 조회 (기준: KRW)
-    fx_results = ["\n*🌍 주요국 환율 (원화 KRW 기준)*"]
+    # 3. 환율 정보 조회 (기준: 1 외화당 KRW)
+    fx_results = ["\n*🌍 주요국 환율 (1 외화당 KRW)*"]
     fx_list = []
     
-    for target in FX_TICKERS:
-        rate = get_exchange_rate("KRW", target)
+    for target, symbol in FX_TICKERS.items():
+        data, error = get_fx_data(symbol)
         
-        if rate:
-             # 결과 포맷: KRW/USD: 0.0007 (1원당 달러 가치)
-             fx_list.append(f"KRW/{target}: {rate:,.5f}") 
+        if data:
+             # 환율은 소수점 2자리까지 표시 (1400.50원)
+             fx_list.append(
+                f"• *{target}*: {data['rate']:,.2f}원 (일:{data['daily_change']:+.2f}%, 주:{data['weekly_change']:+.2f}%)"
+             )
         else:
-             fx_list.append(f"KRW/{target}: 조회 불가")
+             fx_list.append(f"• *{target}*: [조회 실패] - {error}")
              
-    fx_results.append("\n".join(fx_list))
+    fx_results.extend(fx_list)
     message_parts.append("\n".join(fx_results))
 
     # 최종 Slack 메시지 구성
