@@ -50,8 +50,8 @@ def get_price_data(symbol, days=5):
         ticker = yf.Ticker(symbol)
         
         # 1. 가격 및 거래량 데이터 (히스토리)
-        # 넉넉하게 7거래일 데이터를 가져와서 5일 전 종가까지 계산
-        price_data = ticker.history(period=f"{days+2}d", interval="1d", progress=False)
+        # 'progress=False' 인자 제거!
+        price_data = ticker.history(period=f"{days+2}d", interval="1d")
         close_prices = price_data.get('Close').dropna()
         volumes = price_data.get('Volume').dropna()
         
@@ -69,6 +69,7 @@ def get_price_data(symbol, days=5):
 
         # 2. 52주 최고/최저가 데이터 (info)
         info = ticker.info
+        # 지수(Index)의 경우 52주 정보가 없을 수 있으므로 기본값 0으로 설정
         high_52w = info.get('fiftyTwoWeekHigh', 0)
         low_52w = info.get('fiftyTwoWeekLow', 0)
         
