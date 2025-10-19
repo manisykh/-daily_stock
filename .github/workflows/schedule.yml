@@ -1,9 +1,9 @@
 name: Daily Stock & FX Notifier
 
 on:
-  workflow_dispatch:        # 수동 실행 가능
+  workflow_dispatch:          # 수동 실행 가능 (디버깅 용이)
   schedule:
-    - cron: '*/5 * * * *'  # UTC 기준, 한국시간 11:55에 실행
+    - cron: '*/5 * * * *'    # UTC 기준, 매 5분마다 실행
 
 jobs:
   notify:
@@ -21,7 +21,25 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # 💡 디버깅 단계: Secret 값이 제대로 로드되었는지 길이를 확인합니다.
+      - name: Check SLACK_WEBHOOK_URL Load Status
+        run: |
+          # SLACK_WEBHOOK_URL이 비어있는지 확인하고, 비어있지 않다면 길이(Length)를 출력
+          if [ -z "${{ secrets.SLACK_WEBHOOK_URL }}" ]; then
+            echo "ERROR: SLACK_WEBHOOK_URL secret is empty! Please check your GitHub Secrets settings."
+            exit 1
+          else
+            echo "SLACK_WEBHOOK_URL successfully loaded."
+            echo "Length: ${#SLACK_WEBHOOK_URL}"
+          fi
+        env:
+          # 여기서 Secret을 환경 변수로 전달받아 셸 스크립트에서 사용
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }} 
+
+
+      # 💡 메인 스크립트 실행 단계: 수정된 스크립트를 실행합니다.
       - name: Run script
         env:
+          # 스크립트에서 os.getenv()를 통해 사용할 수 있도록 Secret을 전달
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: python script.py
