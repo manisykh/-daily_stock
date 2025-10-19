@@ -171,21 +171,24 @@ def main():
             price = round(data['price'])
             low_52w = round(data['low_52w'])
             high_52w = round(data['high_52w'])
-            # 💡 수정된 부분: 정수형에 대한 쉼표 포맷은 ":," 만 사용
-            price_format = ":," 
+            
+            # 💡 수정된 부분: f-string을 사용하여 정수형의 쉼표 포맷 처리
+            price_str = f"{price:,}"
+            low_52w_str = f"{low_52w:,}"
+            high_52w_str = f"{high_52w:,}"
+            
         else:
             price = data['price']
             low_52w = data['low_52w']
             high_52w = data['high_52w']
-            price_format = ":,.2f" 
-        
+            
+            # 미국 주식은 소수점 두 자리 포맷도 f-string으로 처리
+            price_str = f"{price:,.2f}"
+            low_52w_str = f"{low_52w:,.2f}"
+            high_52w_str = f"{high_52w:,.2f}"
+
         daily_change_str = format_change(data['daily_change'])
         weekly_change_str = format_change(data['weekly_change'])
-
-        # f-string 포맷 문자열을 format() 함수를 사용하여 동적으로 구성
-        price_str = format(price, price_format)
-        low_52w_str = format(low_52w, price_format)
-        high_52w_str = format(high_52w, price_format)
 
         result = (
             f"• *{name}* ({symbol}): {currency_symbol}{price_str}\n"
@@ -225,6 +228,7 @@ def main():
              daily_change_str = format_change(data['daily_change'])
              weekly_change_str = format_change(data['weekly_change'])
              
+             # 환율은 소수점 2자리까지 표시
              fx_list.append(
                 f"• *{target}*: {data['rate']:,.2f}원 (일:{daily_change_str}, 주:{weekly_change_str})"
              )
