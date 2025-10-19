@@ -108,41 +108,54 @@ def get_fx_data(symbol, days=5):
     try:
         fx_data = yf.download(symbol, period=f"{days+2}d", interval="1d", progress=False)
         
-        # 1. DataFrame 유효성 검사 추가: 데이터프레임 자체가 비어있으면 즉시 종료
+        # 1. DataFrame 유효성 검사
         if fx_data.empty:
             return None, "조회된 데이터가 비어있음 (FX Ticker 조회 실패)"
 
-        # 'Close' 데이터만 추출하고 결측치 제거
-        close_rates = fx_data.get('Close').dropna()
+        # 2. Close 컬럼 추출 (MultiIndex 처리)
+        if isinstance(fx_data.columns, pd.MultiIndex):
+            # MultiIndex인 경우: ('Close', 'SYMBOL') 형태
+            if 'Close' in fx_data.columns.get_level_values(0):
+                close_rates = fx_data['Close'].squeeze()  # Series로 변환
+            else:
+                return None, "Close 데이터를 찾을 수 없음"
+        else:
+            # 일반 Index인 경우
+            if 'Close' in fx_data.columns:
+                close_rates = fx_data['Close']
+            else:
+                return None, "Close 데이터를 찾을 수 없음"
         
-        # 2. 데이터 유효성 검사 (최소 2일 데이터 필요)
-        if close_rates.empty or len(close_rates) < 2:
+        # 3. Series로 변환 및 결측치 제거
+        if hasattr(close_rates, 'squeeze'):
+            close_rates = close_rates.squeeze()
+        close_rates = close_rates.dropna()
+        
+        # 4. 데이터 유효성 검사 (최소 2일 데이터 필요)
+        if len(close_rates) < 2:
             return None, "데이터 부족 또는 조회된 거래일이 2일 미만"
             
-        current_rate = close_rates.iloc[-1]
-        yesterday_rate = close_rates.iloc[-2]
+        current_rate = float(close_rates.iloc[-1])
+        yesterday_rate = float(close_rates.iloc[-2])
         
         week_ago_rate = None
-        # 5거래일 전 데이터가 충분한지 확인
         if len(close_rates) >= days + 1:
-            week_ago_rate = close_rates.iloc[-days - 1] 
+            week_ago_rate = float(close_rates.iloc[-days - 1])
 
-        # 변동률 계산
+        # 5. 변동률 계산
         daily_change = (current_rate - yesterday_rate) / yesterday_rate * 100
         
-        # 3. 주간 변동률 계산 (안전한 조건문 유지)
         weekly_change = 0.0
         if week_ago_rate is not None and week_ago_rate != 0:
             weekly_change = (current_rate - week_ago_rate) / week_ago_rate * 100
 
         return {
-            "rate": round(float(current_rate), 2), 
+            "rate": round(current_rate, 2), 
             "daily_change": round(daily_change, 2),
             "weekly_change": round(weekly_change, 2),
         }, None
         
     except Exception as e:
-        # Ambiguous 오류가 이 catch 블록으로 넘어오지 않도록 로직을 강화했습니다.
         return None, f"조회 실패 (yfinance FX): {e}"
 
 # -------------------------------
