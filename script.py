@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 import yfinance as yf
 import requests
+import pandas as pd
 
 # -------------------------------
 # 환경변수에서 Slack Webhook URL 가져오기
@@ -112,11 +113,13 @@ def get_fx_data(symbol, days=5):
         if fx_data.empty:
             return None, "조회된 데이터가 비어있음 (FX Ticker 조회 실패)"
 
-        # 2. Close 컬럼 추출 (MultiIndex 처리)
-        if isinstance(fx_data.columns, pd.MultiIndex):
+        # 2. Close 컬럼 추출 (MultiIndex 처리 - pandas 없이)
+        if hasattr(fx_data.columns, 'levels'):  # MultiIndex 확인
             # MultiIndex인 경우: ('Close', 'SYMBOL') 형태
-            if 'Close' in fx_data.columns.get_level_values(0):
-                close_rates = fx_data['Close'].squeeze()  # Series로 변환
+            if 'Close' in [col[0] if isinstance(col, tuple) else col for col in fx_data.columns]:
+                close_rates = fx_data['Close']
+                if hasattr(close_rates, 'squeeze'):
+                    close_rates = close_rates.squeeze()
             else:
                 return None, "Close 데이터를 찾을 수 없음"
         else:
