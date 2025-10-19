@@ -85,9 +85,8 @@ def get_price_data(symbol, days=5):
 
         # 2. 52주 최고/최저가 데이터 (info)
         info = ticker.info
-        # 지수(Index)의 경우 52주 정보가 없을 수 있으므로 기본값 0으로 설정
-        high_52w = info.get('fiftyTwoWeekHigh', 0)
-        low_52w = info.get('fiftyTwoWeekLow', 0)
+        high_52w = info.get('fiftyTwoWeekHigh', 0.0)
+        low_52w = info.get('fiftyTwoWeekLow', 0.0)
         
         # 3. 거래량
         current_volume = volumes.iloc[-1]
@@ -97,12 +96,13 @@ def get_price_data(symbol, days=5):
         weekly_change = (current_price - week_ago_price) / week_ago_price * 100 if week_ago_price is not None and week_ago_price != 0 else 0.0
 
         return {
-            "price": float(current_price), # 포매팅은 main에서 처리
+            "price": float(current_price),
+            "low_52w": float(low_52w),
+            "high_52w": float(high_52w),
+            
             "daily_change": round(daily_change, 2),
             "weekly_change": round(weekly_change, 2),
             "volume": int(current_volume),
-            "high_52w": float(high_52w),
-            "low_52w": float(low_52w),
         }, None
         
     except Exception as e:
@@ -166,15 +166,24 @@ def main():
     # 주식/지수 메시지 포맷 함수 정의
     def format_stock_message(name, symbol, data, currency_symbol, is_kr_stock=False):
         
-        # 한국 주식인 경우 가격을 정수 포매팅 (:,.0f)으로 처리
-        price_format = ":,.0f" if is_kr_stock else ":,.2f"
+        # 한국 주식인 경우 값 자체를 정수로 변환하여 포맷을 : ,d로 설정합니다.
+        if is_kr_stock:
+            price = round(data['price'])
+            low_52w = round(data['low_52w'])
+            high_52w = round(data['high_52w'])
+            # 정수형에 대한 쉼표 포맷
+            price_format = ":,d" 
+        else:
+            price = data['price']
+            low_52w = data['low_52w']
+            high_52w = data['high_52w']
+            # 미국 주식은 소수점 두 자리 포맷
+            price_format = ":,.2f" 
         
-        # f-string에서 price_format을 변수로 사용하기 위해 eval을 사용하거나, 두 단계로 포매팅해야 하지만,
-        # 안전하고 간결한 방법을 위해 포맷 문자열을 직접 구성합니다.
-        
-        price_str = f"{data['price']:{price_format}}"
-        low_52w_str = f"{data['low_52w']:{price_format}}"
-        high_52w_str = f"{data['high_52w']:{price_format}}"
+        # f-string 포맷 문자열을 format() 함수를 사용하여 동적으로 구성
+        price_str = format(price, price_format)
+        low_52w_str = format(low_52w, price_format)
+        high_52w_str = format(high_52w, price_format)
 
         result = (
             f"• *{name}* ({symbol}): {currency_symbol}{price_str}\n"
@@ -188,7 +197,7 @@ def main():
     for name, symbol in KR_TICKERS.items():
         data, error = get_price_data(symbol)
         if data:
-            # is_kr_stock=True 설정하여 정수 포맷 적용
+            # is_kr_stock=True 설정
             kr_results.append(format_stock_message(name, symbol, data, "₩", is_kr_stock=True))
         else:
             kr_results.append(f"• {name} ({symbol}): [조회 실패] - {error}")
